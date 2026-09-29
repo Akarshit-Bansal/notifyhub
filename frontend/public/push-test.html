@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>NotifyHub Web Push Test</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 30px; }
+    button { padding: 12px 20px; font-size: 16px; }
+    pre { background: #f4f4f4; padding: 15px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>NotifyHub Web Push Test</h2>
+  <button id="test">Enable & Test Push</button>
+  <pre id="log">Ready...</pre>
+
+<script>
+const log = (msg) => {
+  document.getElementById("log").textContent += "\n" + msg;
+};
+
+function base64ToUint8Array(base64) {
+  const padding = "=".repeat((4 - base64.length % 4) % 4);
+  const base64String = (base64 + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = atob(base64String);
+
+  return Uint8Array.from(
+    Array.from(rawData).map(c => c.charCodeAt(0))
+  );
+}
+
+document.getElementById("test").onclick = async () => {
+  try {
+    log("Requesting notification permission...");
+
+    const permission = await Notification.requestPermission();
+    log("Permission: " + permission);
+
+    if (permission !== "granted") {
+      throw new Error("Notification permission was not granted.");
+    }
+
+    log("Registering service worker...");
+
+    const registration =
+      await navigator.serviceWorker.register("/sw.js");
+
+    log("Service worker registered.");
+
+    const response =
+      await fetch("http://127.0.0.1:8000/api/push/public-key/");
+
+    log("Public key API status: " + response.status);
+
+    if (!response.ok) {
+      throw new Error(
+        "Public key API failed: " + response.status
+      );
+    }
+
+    const result = await response.json();
+
+    log("Public key received.");
+
+    let subscription =
+      await registration.pushManager.getSubscription();
+
+    if (!subscription) {
+      log("Creating PushSubscription...");
+
+      subscription =
+        await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey:
+            base64ToUint8Array(result.public_key)
+        });
+    }
+
+    log("Push subscription created!");
+
+    const saveResponse =
+      await fetch("http://127.0.0.1:8000/api/push/subscribe/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(subscription.toJSON())
+      });
+
+    const saveText = await saveResponse.text();
+
+    log("Backend save status: " + saveResponse.status);
+    log("Backend response: " + saveText);
+
+  } catch (error) {
+    log("ERROR: " + error.name);
+    log("MESSAGE: " + error.message);
+    console.error(error);
+  }
+};
+</script>
+</body>
+</html>
